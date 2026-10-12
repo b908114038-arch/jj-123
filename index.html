@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="zh-TW" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MQTT 智慧語音控制終端</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        'soft-blue': '#38bdf8',
+                        'deep-blue': '#1e40af',
+                        'purple-gold': '#a855f7',
+                        'gold-accent': '#f59e0b',
+                    },
+                    boxShadow: {
+                        'glow-blue': '0 0 25px -5px rgba(56, 189, 248, 0.5)',
+                        'glow-deep': '0 0 25px -5px rgba(30, 64, 175, 0.6)',
+                        'glow-purple': '0 0 25px -5px rgba(168, 85, 247, 0.5)',
+                        'glow-gold': '0 0 25px -5px rgba(245, 158, 11, 0.5)',
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- MQTT.js Reliable CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/4.3.7/mqtt.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        body {
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            background-color: #0f172a;
+            color: #f8fafc;
+        }
+        .bg-purple-gold-grad {
+            background: linear-gradient(135deg, #4c1d95 0%, #7e22ce 50%, #d97706 100%);
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #1e293b;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #475569;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body class="min-h-screen bg-slate-950 text-slate-100 flex flex-col justify-between p-4 sm:p-6 md:p-8">
+
+    <div class="max-w-6xl mx-auto w-full space-y-6">
+        
+        <!-- Header Section -->
+        <header class="flex flex-col md:flex-row justify-between items-center bg-slate-900/80 backdrop-blur-md border border-slate-800 p-5 rounded-2xl shadow-xl gap-4">
+            <div class="flex items-center gap-3">
+                <div class="p-3 bg-gradient-to-br from-blue-500 to-indigo-600 rounded-xl shadow-lg">
+                    <i class="fa-solid fa-satellite-dish text-2xl text-white"></i>
+                </div>
+                <div>
+                    <h1 class="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 via-purple-300 to-amber-300">MQTT 控制與語音控制台</h1>
+                    <p class="text-xs text-slate-400">訂閱主題：<span class="font-mono text-cyan-400 font-semibold">jj/testa</span> | Server: <span id="currentBrokerText" class="font-mono text-amber-300">wss://broker.emqx.io:8084/mqtt</span></p>
+                </div>
+            </div>
+
+            <div class="flex items-center gap-3 bg-slate-950/60 border border-slate-800 px-4 py-2.5 rounded-xl">
+                <div id="statusDot" class="w-3.5 h-3.5 rounded-full bg-amber-500 animate-pulse shadow-[0_0_10px_#f59e0b]"></div>
+                <div class="flex flex-col">
+                    <span class="text-xs text-slate-400 font-medium">伺服器連線狀態</span>
+                    <span id="statusText" class="text-sm font-semibold text-amber-400">連線中...</span>
+                </div>
+                <button id="reconnectBtn" onclick="toggleConnect()" class="ml-2 px-3 py-1 text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg transition-colors border border-slate-700">
+                    <i class="fa-solid fa-rotate-right mr-1"></i>重連
+                </button>
+            </div>
+        </header>
+
+        <!-- Connection Protocol Selector Settings -->
+        <div class="bg-slate-900/40 border border-slate-800/80 rounded-xl p-4 text-xs text-slate-300 flex flex-wrap items-center justify-between gap-3">
+            <div class="flex items-center gap-2">
+                <i class="fa-solid fa-gears text-slate-400"></i>
+                <span class="font-medium">快速連線模式切換：</span>
+            </div>
+            <div class="flex flex-wrap gap-2">
+                <button onclick="setConnectionUrl('wss://broker.emqx.io:8084/mqtt')" class="px-3 py-1 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-slate-200 font-mono transition-colors">
+                    WSS 8084 (加密/推薦)
+                </button>
+                <button onclick="setConnectionUrl('ws://broker.emqx.io:8083/mqtt')" class="px-3 py-1 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-slate-200 font-mono transition-colors">
+                    WS 8083 (標準)
+                </button>
+                <button onclick="setConnectionUrl('wss://broker.emqx.io:8084/ws')" class="px-3 py-1 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-lg text-slate-200 font-mono transition-colors">
+                    WSS /ws (備用路徑)
+                </button>
+            </div>
+        </div>
+
+        <!-- Main Grid Container -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+            <section class="lg:col-span-7 flex flex-col gap-6">
+                
+                <!-- 3 Premium Buttons Card -->
+                <div class="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 backdrop-blur-md shadow-xl">
+                    <h2 class="text-lg font-semibold text-slate-200 mb-4 flex items-center gap-2">
+                        <i class="fa-solid fa-gamepad text-sky-400"></i> MQTT 控制按鈕
+                    </h2>
+                    
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                        
+                        <!-- Button 1: Light Blue (淡藍色) -->
+                        <button onclick="publishTopic('b1_on', '按鈕 1 (淡藍)')" 
+                                class="group relative flex flex-col items-center justify-center p-6 rounded-2xl bg-gradient-to-br from-sky-400 to-cyan-500 text-slate-950 font-bold shadow-lg hover:shadow-glow-blue transition-all duration-300 hover:-translate-y-1 active:translate-y-0 border border-sky-300/40 overflow-hidden">
+                            <i class="fa-solid fa-power-off text-2xl mb-2 text-slate-900 group-hover:scale-110 transition-transform"></i>
+                            <span class="text-base font-extrabold tracking-wide">按鈕 1</span>
+                            <span class="text-xs font-semibold text-slate-800 mt-1 bg-white/30 px-2 py-0.5 rounded-full">淡藍風格</span>
+                            <span class="text-[10px] text-slate-900 mt-2 font-mono">Payload: b1_on</span>
+                        </button>
+
+                        <!-- Button 2: Deep Blue (深藍色) -->
+                        <button onclick="publishTopic('b2_on', '按鈕 2 (深藍)')" 
+                                class="group relative flex flex-col items-center justify-center p-6 rounded-2xl bg-gradient-to-br from-blue-700 via-indigo-800 to-blue-900 text-white font-bold shadow-lg hover:shadow-glow-deep transition-all duration-300 hover:-translate-y-1 active:translate-y-0 border border-blue-500/30 overflow-hidden">
+                            <i class="fa-solid fa-bolt text-2xl mb-2 text-blue-300 group-hover:scale-110 transition-transform"></i>
+                            <span class="text-base font-extrabold tracking-wide">按鈕 2</span>
+                            <span class="text-xs font-medium text-blue-200 mt-1 bg-blue-950/50 border border-blue-600/40 px-2 py-0.5 rounded-full">深藍風格</span>
+                            <span class="text-[10px] text-blue-300 mt-2 font-mono">Payload: b2_on</span>
+                        </button>
+
+                        <!-- Button 3: Luxury Purple Gold (紫金色) -->
+                        <button onclick="publishTopic('b3_on', '按鈕 3 (紫金)')" 
+                                class="group relative flex flex-col items-center justify-center p-6 rounded-2xl bg-purple-gold-grad text-white font-bold shadow-lg hover:shadow-glow-purple transition-all duration-300 hover:-translate-y-1 active:translate-y-0 border border-amber-500/40 overflow-hidden">
+                            <i class="fa-solid fa-crown text-2xl mb-2 text-amber-300 group-hover:scale-110 transition-transform"></i>
+                            <span class="text-base font-extrabold tracking-wide text-amber-100">按鈕 3</span>
+                            <span class="text-xs font-semibold text-amber-300 mt-1 bg-black/40 border border-amber-500/30 px-2 py-0.5 rounded-full">紫金風格</span>
+                            <span class="text-[10px] text-amber-200 mt-2 font-mono">Payload: b3_on</span>
+                        </button>
+
+                    </div>
+                </div>
+
+                <!-- Voice Input Card -->
+                <div class="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 backdrop-blur-md shadow-xl">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-lg font-semibold text-slate-200 flex items-center gap-2">
+                            <i class="fa-solid fa-microphone text-purple-400"></i> 語音輸入模式
+                        </h2>
+                        <label class="inline-flex items-center cursor-pointer">
+                            <input type="checkbox" id="autoPublishVoice" class="sr-only peer" checked>
+                            <div class="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-purple-600"></div>
+                            <span class="ml-2 text-xs text-slate-300">識別後自動傳送</span>
+                        </label>
+                    </div>
+
+                    <div class="flex flex-col sm:flex-row items-center gap-4">
+                        <button id="micBtn" onclick="toggleSpeech()" 
+                                class="w-full sm:w-auto min-w-[140px] flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-100 font-semibold transition-all shadow-md active:scale-95">
+                            <i id="micIcon" class="fa-solid fa-microphone text-slate-400 text-lg"></i>
+                            <span id="micStatusText">開啟語音</span>
+                        </button>
+
+                        <div class="w-full relative">
+                            <input type="text" id="speechResult" placeholder="語音辨識結果將顯示於此..." 
+                                   class="w-full bg-slate-950/80 border border-slate-800 rounded-xl px-4 py-3 text-sm text-slate-200 focus:outline-none focus:border-purple-500 transition-colors pr-20">
+                            <button onclick="publishCustomVoice()" class="absolute right-2 top-1.5 bottom-1.5 px-3 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-xs font-semibold transition-colors">
+                                發送
+                            </button>
+                        </div>
+                    </div>
+                    <p id="speechPrompt" class="text-xs text-slate-400 mt-2 flex items-center gap-1">
+                        <i class="fa-solid fa-circle-info text-sky-400"></i> 提示：點擊麥克風按鈕後開始說話，識別結果可即時傳送至 <span class="font-mono text-cyan-300">jj/testa</span>。
+                    </p>
+                </div>
+
+            </section>
+
+            <!-- Terminal Output Box -->
+            <section class="lg:col-span-5 flex flex-col">
+                <div class="bg-slate-900/60 border border-slate-800 rounded-2xl p-6 backdrop-blur-md shadow-xl flex-1 flex flex-col">
+                    <div class="flex justify-between items-center mb-4">
+                        <h2 class="text-lg font-semibold text-slate-200 flex items-center gap-2">
+                            <i class="fa-solid fa-terminal text-emerald-400"></i> 即時通訊與除錯日誌
+                        </h2>
+                        <button onclick="clearLog()" class="text-xs text-slate-400 hover:text-slate-200 bg-slate-800 hover:bg-slate-700 px-2.5 py-1 rounded-md border border-slate-700 transition-colors">
+                            <i class="fa-solid fa-trash-can mr-1"></i>清除
+                        </button>
+                    </div>
+
+                    <div id="logConsole" class="flex-1 min-h-[320px] max-h-[480px] bg-slate-950 border border-slate-800 rounded-xl p-4 font-mono text-xs overflow-y-auto space-y-2 custom-scrollbar">
+                        <div class="text-slate-500">[系統] 系統初始化中...</div>
+                    </div>
+
+                    <div class="mt-4 pt-4 border-t border-slate-800 flex gap-2">
+                        <input type="text" id="customPayload" placeholder="自訂發送 Payload 內容..." 
+                               class="flex-1 bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-blue-500">
+                        <button onclick="publishCustomText()" class="px-4 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-xl transition-colors">
+                            發送
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+        </div>
+
+        <!-- Footer -->
+        <footer class="text-center text-xs text-slate-500 py-2">
+            MQTT Client Web Terminal &bull; Topic: <span class="text-slate-400 font-mono">jj/testa</span>
+        </footer>
+
+    </div>
+
+    <script>
+        const topic = 'jj/testa';
+        
+        // List of candidate broker URLs for automatic retry if primary fails
+        const brokerCandidates = [
+            'wss://broker.emqx.io:8084/mqtt',
+            'ws://broker.emqx.io:8083/mqtt',
+            'wss://broker.emqx.io:8084/ws'
+        ];
+
+        let currentBrokerIdx = 0;
+        let activeBrokerUrl = brokerCandidates[0];
+        let client = null;
+        let isConnected = false;
+        let retryCount = 0;
+
+        const statusDot = document.getElementById('statusDot');
+        const statusText = document.getElementById('statusText');
+        const reconnectBtn = document.getElementById('reconnectBtn');
+        const logConsole = document.getElementById('logConsole');
+        const currentBrokerText = document.getElementById('currentBrokerText');
+
+        function setConnectionUrl(newUrl) {
+            activeBrokerUrl = newUrl;
+            currentBrokerText.innerText = activeBrokerUrl;
+            appendLog('SYSTEM', `切換伺服器至: ${activeBrokerUrl}`);
+            if (client) {
+                client.end(true, () => connectMQTT());
+            } else {
+                connectMQTT();
+            }
+        }
+
+        function connectMQTT() {
+            if (typeof mqtt === 'undefined') {
+                appendLog('ERROR', 'MQTT.js 套件尚未載入完成，請稍後或重設頁面。');
+                updateStatus('error', 'MQTT.js 載入失敗');
+                return;
+            }
+
+            if (client) {
+                try { client.end(true); } catch(e){}
+            }
+
+            currentBrokerText.innerText = activeBrokerUrl;
+            updateStatus('connecting', '連線中...');
+            appendLog('SYSTEM', `嘗試連線至: ${activeBrokerUrl}`);
+
+            const clientId = 'web_' + Math.random().toString(16).substring(2, 10);
+
+            const options = {
+                keepalive: 60,
+                clientId: clientId,
+                protocolId: 'MQTT',
+                protocolVersion: 4,
+                clean: true,
+                reconnectPeriod: 0, // Manual retry logic for fallback
+                connectTimeout: 8000,
+            };
+
+            try {
+                client = mqtt.connect(activeBrokerUrl, options);
+
+                client.on('connect', () => {
+                    isConnected = true;
+                    retryCount = 0;
+                    updateStatus('connected', '連線成功！');
+                    appendLog('SUCCESS', `已連線至 Broker！ClientID: ${clientId}`);
+
+                    // Subscribe to target topic
+                    client.subscribe(topic, { qos: 0 }, (err) => {
+                        if (!err) {
+                            appendLog('SUBSCRIBE', `成功訂閱主題：[${topic}]`);
+                        } else {
+                            appendLog('ERROR', `訂閱失敗: ${err.message}`);
+                        }
+                    });
+                });
+
+                client.on('message', (receivedTopic, message) => {
+                    const msgStr = message.toString();
+                    appendLog('RECEIVE', `[${receivedTopic}] -> ${msgStr}`);
+                });
+
+                client.on('error', (err) => {
+                    appendLog('ERROR', `連線錯誤: ${err.message || '無法連線到該端點'}`);
+                    handleConnectionFailure();
+                });
+
+                client.on('close', () => {
+                    if (isConnected) {
+                        isConnected = false;
+                        updateStatus('disconnected', '已斷開連線');
+                        appendLog('WARN', '與 MQTT 伺服器的連線已中斷。');
+                    } else {
+                        handleConnectionFailure();
+                    }
+                });
+
+            } catch (e) {
+                appendLog('ERROR', `連線異常: ${e.message}`);
+                handleConnectionFailure();
+            }
+        }
+
+        function handleConnectionFailure() {
+            if (isConnected) return;
+
+            retryCount++;
+            if (retryCount < brokerCandidates.length) {
+                currentBrokerIdx = (currentBrokerIdx + 1) % brokerCandidates.length;
+                activeBrokerUrl = brokerCandidates[currentBrokerIdx];
+                appendLog('WARN', `嘗試備用連線端點 (${retryCount}/${brokerCandidates.length}): ${activeBrokerUrl}`);
+                setTimeout(connectMQTT, 1500);
+            } else {
+                updateStatus('error', '連線失敗');
+                appendLog('ERROR', '所有預設連線埠號嘗試均失敗，請檢查網路或點擊上方按鈕切換協定！');
+            }
+        }
+
+        function publishTopic(payload, sourceName = '控制按鈕') {
+            if (!client || !isConnected) {
+                appendLog('WARN', `發送失敗：MQTT 目前未連線。訊息: [${payload}]`);
+                alert('MQTT 目前未連線，請點擊右上方「重連」或切換快速連線模式！');
+                return;
+            }
+
+            client.publish(topic, payload, { qos: 0, retain: false }, (err) => {
+                if (!err) {
+                    appendLog('PUBLISH', `[${sourceName}] 發送至 ${topic} -> ${payload}`);
+                } else {
+                    appendLog('ERROR', `發送失敗: ${err.message}`);
+                }
+            });
+        }
+
+        function publishCustomText() {
+            const input = document.getElementById('customPayload');
+            const val = input.value.trim();
+            if (val) {
+                publishTopic(val, '自訂輸入');
+                input.value = '';
+            }
+        }
+
+        function toggleConnect() {
+            retryCount = 0;
+            if (client && isConnected) {
+                client.end(true, () => {
+                    isConnected = false;
+                    updateStatus('disconnected', '已斷開');
+                    appendLog('SYSTEM', '手動斷開連線。');
+                });
+            } else {
+                connectMQTT();
+            }
+        }
+
+        function updateStatus(state, message) {
+            statusText.innerText = message;
+            statusDot.className = "w-3.5 h-3.5 rounded-full transition-all duration-300 ";
+
+            if (state === 'connected') {
+                statusDot.classList.add('bg-emerald-500', 'shadow-[0_0_12px_#10b981]');
+                statusText.className = "text-sm font-semibold text-emerald-400";
+                reconnectBtn.innerText = "斷開";
+            } else if (state === 'connecting') {
+                statusDot.classList.add('bg-amber-500', 'animate-pulse', 'shadow-[0_0_10px_#f59e0b]');
+                statusText.className = "text-sm font-semibold text-amber-400";
+                reconnectBtn.innerText = "連線中...";
+            } else if (state === 'error' || state === 'disconnected') {
+                statusDot.classList.add('bg-rose-500', 'shadow-[0_0_10px_#f43f5e]');
+                statusText.className = "text-sm font-semibold text-rose-400";
+                reconnectBtn.innerText = "重新連線";
+            }
+        }
+
+        function appendLog(type, text) {
+            const now = new Date();
+            const timeStr = now.toTimeString().split(' ')[0] + '.' + String(now.getMilliseconds()).padStart(3, '0');
+            
+            const logEntry = document.createElement('div');
+            logEntry.className = "flex gap-2 items-start font-mono text-[11px] leading-relaxed";
+
+            let typeTag = '';
+            switch(type) {
+                case 'PUBLISH':
+                    typeTag = `<span class="bg-blue-950 text-blue-400 px-1.5 py-0.5 rounded border border-blue-800 font-bold">PUB</span>`;
+                    break;
+                case 'RECEIVE':
+                    typeTag = `<span class="bg-emerald-950 text-emerald-400 px-1.5 py-0.5 rounded border border-emerald-800 font-bold">SUB</span>`;
+                    break;
+                case 'SUCCESS':
+                    typeTag = `<span class="bg-teal-950 text-teal-300 px-1.5 py-0.5 rounded border border-teal-800 font-bold">OK</span>`;
+                    break;
+                case 'ERROR':
+                    typeTag = `<span class="bg-rose-950 text-rose-400 px-1.5 py-0.5 rounded border border-rose-800 font-bold">ERR</span>`;
+                    break;
+                case 'WARN':
+                    typeTag = `<span class="bg-amber-950 text-amber-400 px-1.5 py-0.5 rounded border border-amber-800 font-bold">WARN</span>`;
+                    break;
+                default:
+                    typeTag = `<span class="bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded border border-slate-700 font-bold">INFO</span>`;
+            }
+
+            logEntry.innerHTML = `<span class="text-slate-500 shrink-0">${timeStr}</span> ${typeTag} <span class="text-slate-300 break-all">${escapeHtml(text)}</span>`;
+            
+            logConsole.appendChild(logEntry);
+            logConsole.scrollTop = logConsole.scrollHeight;
+        }
+
+        function clearLog() {
+            logConsole.innerHTML = '<div class="text-slate-500">[系統] 日誌紀錄已清除</div>';
+        }
+
+        function escapeHtml(str) {
+            return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        }
+
+        // Web Speech API Integration
+        let recognition = null;
+        let isListening = false;
+
+        function initSpeech() {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            if (!SpeechRecognition) {
+                appendLog('WARN', '當前瀏覽器不支援 Web Speech API。');
+                document.getElementById('speechPrompt').innerText = "當前瀏覽器不支援語音辨識，請使用 Chrome / Edge。";
+                document.getElementById('micBtn').disabled = true;
+                return;
+            }
+
+            recognition = new SpeechRecognition();
+            recognition.continuous = false;
+            recognition.interimResults = true;
+            recognition.lang = 'zh-TW';
+
+            recognition.onstart = () => {
+                isListening = true;
+                updateMicUI(true);
+                appendLog('SYSTEM', '開始語音辨識，請說話...');
+            };
+
+            recognition.onresult = (event) => {
+                let transcript = '';
+                for (let i = event.resultIndex; i < event.results.length; i++) {
+                    transcript += event.results[i][0].transcript;
+                }
+                document.getElementById('speechResult').value = transcript;
+
+                if (event.results[0].isFinal) {
+                    appendLog('SYSTEM', `語音辨識內容："${transcript}"`);
+                    const autoPublish = document.getElementById('autoPublishVoice').checked;
+                    if (autoPublish && transcript.trim()) {
+                        publishTopic(transcript.trim(), '語音辨識');
+                    }
+                }
+            };
+
+            recognition.onerror = (event) => {
+                appendLog('ERROR', `語音辨識錯誤: ${event.error}`);
+                isListening = false;
+                updateMicUI(false);
+            };
+
+            recognition.onend = () => {
+                isListening = false;
+                updateMicUI(false);
+            };
+        }
+
+        function toggleSpeech() {
+            if (!recognition) initSpeech();
+            if (!recognition) return;
+
+            if (isListening) {
+                recognition.stop();
+            } else {
+                try {
+                    recognition.start();
+                } catch (e) {
+                    appendLog('WARN', `語音發動失敗: ${e.message}`);
+                }
+            }
+        }
+
+        function updateMicUI(listening) {
+            const micBtn = document.getElementById('micBtn');
+            const micIcon = document.getElementById('micIcon');
+            const micStatusText = document.getElementById('micStatusText');
+
+            if (listening) {
+                micBtn.className = "w-full sm:w-auto min-w-[140px] flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl bg-purple-600 border border-purple-400 text-white font-semibold transition-all shadow-glow-purple animate-pulse";
+                micIcon.className = "fa-solid fa-microphone text-white text-lg animate-bounce";
+                micStatusText.innerText = "聆聽中...";
+            } else {
+                micBtn.className = "w-full sm:w-auto min-w-[140px] flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-100 font-semibold transition-all shadow-md active:scale-95";
+                micIcon.className = "fa-solid fa-microphone text-slate-400 text-lg";
+                micStatusText.innerText = "開啟語音";
+            }
+        }
+
+        function publishCustomVoice() {
+            const val = document.getElementById('speechResult').value.trim();
+            if (val) {
+                publishTopic(val, '語音結果');
+            }
+        }
+
+        window.onload = function() {
+            setTimeout(connectMQTT, 300);
+            initSpeech();
+        };
+    </script>
+</body>
+</html>
